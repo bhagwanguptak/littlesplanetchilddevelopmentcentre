@@ -122,7 +122,16 @@ async function fetchSettings() {
       heroGradient: { color1: '#007bff', color2: '#6f42c1', color3: '#fd7e14', color4: '#00c6ff', direction: '45deg'},
       defaultCarouselImageURL: '/uploads/placeholder-carousel.jpg ',
       defaultCarouselAltText: 'Our Beautiful Campus', defaultCarouselLink: '#about',
-      contactFormAction: 'whatsapp', schoolContactEmail: '', adminSchoolWhatsappNumber: ''
+      contactFormAction: 'whatsapp', schoolContactEmail: '', adminSchoolWhatsappNumber: '',
+      topHeaderPhone: '',
+      topHeaderEmail: '',
+      topHeaderPhone: '',
+      topHeaderEmail: '',
+      topHeaderColor1: '#42a324',
+      topHeaderColor2: '#0a58ca',
+      topHeaderTextColor: '#ffffff',
+
+
     };
 
     const completeSettings = {
@@ -282,6 +291,15 @@ async function saveAdminSettings() {
             contactFormAction: querySelector('input[name="contactFormAction"]:checked')?.value || 'whatsapp',
             schoolContactEmail: getElement('schoolContactEmail')?.value.trim() || '',
             adminSchoolWhatsappNumber: getElement('adminSchoolWhatsappNumber')?.value.trim() || '',
+            topHeaderPhone: getElement('topHeaderPhone')?.value.trim() || '',
+            topHeaderEmail: getElement('topHeaderEmail')?.value.trim() || '',
+            topHeaderPhone: getElement('topHeaderPhone')?.value.trim() || '',
+            topHeaderEmail: getElement('topHeaderEmail')?.value.trim() || '',
+            topHeaderColor1: getElement('topHeaderColor1')?.value || '#42a324',
+            topHeaderColor2: getElement('topHeaderColor2')?.value || '#0a58ca',
+            topHeaderTextColor: getElement('topHeaderTextColor')?.value || '#ffffff',
+
+
         };
 
         const gradientSections = ['hero', 'about', 'admissions', 'academics', 'facilities', 'contact'];
@@ -469,6 +487,15 @@ function populateAdminForm(settings, carouselImages) {
     getElement('contactActionWhatsapp').checked = contactAction !== 'email';
     getElement('schoolContactEmail').value = settings.schoolContactEmail || '';
     getElement('adminSchoolWhatsappNumber').value = settings.adminSchoolWhatsappNumber || '';
+    getElement('topHeaderPhone').value = settings.topHeaderPhone || '';
+    getElement('topHeaderEmail').value = settings.topHeaderEmail || '';
+    getElement('topHeaderPhone').value = settings.topHeaderPhone || '';
+    getElement('topHeaderEmail').value = settings.topHeaderEmail || '';
+    getElement('topHeaderColor1').value = settings.topHeaderColor1 || '#42a324';
+    getElement('topHeaderColor2').value = settings.topHeaderColor2 || '#0a58ca';
+    getElement('topHeaderTextColor').value = settings.topHeaderTextColor || '#ffffff';
+
+
 
     loadGradientSettings(settings);
     displayCarouselImagesAdmin(carouselImages);
@@ -480,7 +507,43 @@ function populatePublicPage(settings, carouselImages) {
     populateFacilityCardsPublic(settings.facilityCards || [], settings.facilitiesText);
     populateSocialLinksPublic(settings.socialLinks || {}, settings.socialWhatsapp);
     applyMapPublic(settings.contactMapEmbedURL);
+    applyTopHeader(settings);
+
 }
+function applyTopHeader(settings) {
+   const header = document.querySelector('.top-header');
+  const phoneEl = document.getElementById('topPhone');
+  const emailEl = document.getElementById('topEmail');
+
+  // ✅ Phone
+  if (phoneEl && settings.topHeaderPhone) {
+    phoneEl.textContent = settings.topHeaderPhone;
+    phoneEl.href = `tel:${settings.topHeaderPhone.replace(/\s+/g, '')}`;
+    phoneEl.style.display = 'inline';
+  }
+
+  // ✅ Email
+  if (emailEl && settings.topHeaderEmail) {
+    emailEl.textContent = settings.topHeaderEmail;
+    emailEl.href = `mailto:${settings.topHeaderEmail}`;
+    emailEl.style.display = 'inline';
+  }
+
+  // ✅ Background Gradient
+  if (header) {
+    const c1 = settings.topHeaderColor1 || '#42a324';
+    const c2 = settings.topHeaderColor2 || '#0a58ca';
+    const text = settings.topHeaderTextColor || '#ffffff';
+
+    header.style.background = `linear-gradient(90deg, ${c1}, ${c2})`;
+    header.style.color = text;
+
+    header.querySelectorAll('a, i').forEach(el => {
+      el.style.color = text;
+    });
+  }
+}
+
 
 function generateFacilityCardInputsAdmin(facilityCardsData = []) {
     const container = getElement('facilityCardsAdminContainer');

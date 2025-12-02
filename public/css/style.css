@@ -487,3 +487,47 @@ html[data-theme="dark"] .btn-secondary:hover {
     max-height: 36px;
   }
 }
+/* ===== Top Contact Header (FULL WIDTH FIXED) ===== */
+.top-header {
+  background: transparent;
+  color: #fff;
+  font-size: 0.9rem;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100vw;       /* ✅ Forces full screen width */
+  max-width: 100%;
+  z-index: 1055;
+  overflow-x: hidden; /* ✅ Prevents side gaps on mobile */
+}
+
+.top-header a {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.top-header a:hover {
+  text-decoration: underline;
+}
+
+.top-header-right a {
+  font-size: 1.1rem;
+}
+
+/* ✅ Prevent horizontal scroll from fixed elements */
+body {
+  overflow-x: hidden;
+}
+
+/* ✅ Push main navbar below top header */
+.navbar-custom {
+  margin-top: 42px;
+}
+
+@media (max-width: 768px) {
+  .navbar-custom {
+    margin-top: 68px;
+  }
+}
