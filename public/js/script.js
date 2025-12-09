@@ -1,168 +1,177 @@
-// script.js - Enhanced scroll behavior for fixed navbar & other UI enhancements
-document.addEventListener("DOMContentLoaded", () => {
-  const navbar = document.querySelector('.navbar-custom');
-  const scrollLinks = document.querySelectorAll('a.nav-link[href^="#"]');
-  const API_BASE_URL_PUBLIC = ''; // Relative for public page API calls
+document.addEventListener("DOMContentLoaded", async () => {
+    const API_BASE = ''; 
 
-  const getNavbarHeight = () => navbar ? navbar.offsetHeight : 0;
+    try {
+        const [settingsRes, servicesRes, testRes, carouselRes] = await Promise.all([
+            fetch(`${API_BASE}/api/settings`),
+            fetch(`${API_BASE}/api/services`),
+            fetch(`${API_BASE}/api/testimonials`),
+            fetch(`${API_BASE}/api/carousel`)
+        ]);
 
-  const smoothScroll = (e) => {
-    e.preventDefault();
-    const href = e.currentTarget.getAttribute('href');
-    if (href && href.length > 1 && href.startsWith('#')) {
-        const targetId = href.substring(1);
-        const target = document.getElementById(targetId);
-        if (target) {
-          const navbarHeight = getNavbarHeight();
-          const targetPosition = target.getBoundingClientRect().top + window.pageYOffset;
-          const offsetPosition = targetPosition - navbarHeight;
-          window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
-          
-          const navbarToggler = navbar?.querySelector('.navbar-toggler');
-          const navbarCollapse = navbar?.querySelector('.navbar-collapse');
-          if (navbarToggler && navbarCollapse?.classList.contains('show') && getComputedStyle(navbarToggler).display !== 'none') {
-             const bsCollapse = bootstrap.Collapse.getInstance(navbarCollapse) || new bootstrap.Collapse(navbarCollapse, { toggle: false });
-             bsCollapse.hide();
-          }
+        const settings = await settingsRes.json();
+        const services = await servicesRes.json().catch(()=>[]);
+        const testimonials = await testRes.json().catch(()=>[]);
+        const slides = await carouselRes.json().catch(()=>[]);
+        
+        const safeServices = Array.isArray(services) ? services : [];
+        const safeTestimonials = Array.isArray(testimonials) ? testimonials : [];
+        const safeSlides = Array.isArray(slides) ? slides : [];
+
+        // --- 1. DYNAMIC THEME COLORS ---
+        if (settings.themePrimary) {
+            document.documentElement.style.setProperty('--primary-color', settings.themePrimary);
         }
-    }
-  };
+        if (settings.themeSecondary) {
+            document.documentElement.style.setProperty('--secondary-color', settings.themeSecondary);
+        }
 
-  scrollLinks.forEach(link => link.addEventListener('click', smoothScroll));
+        // --- 2. Visibility ---
+        let visibility = { hero: true, about: true, services: true, admissions: true, testimonials: true, contact: true };
+        if(settings.sectionVisibility) {
+            let visData = settings.sectionVisibility;
+            if (typeof visData === 'string') {
+                try { visData = JSON.parse(visData); } catch(e) {}
+            }
+            visibility = { ...visibility, ...visData };
+        }
 
-  if (window.location.hash && window.location.hash.length > 1) {
-    const targetId = window.location.hash.substring(1);
-    const target = document.getElementById(targetId);
-    if (target) {
-      setTimeout(() => {
-        const navbarHeight = getNavbarHeight();
-        const targetPosition = target.getBoundingClientRect().top + window.pageYOffset;
-        const offsetPosition = targetPosition - navbarHeight;
-        window.scrollTo({ top: offsetPosition, behavior: 'auto' });
-      }, 300); // Increased timeout for dynamic content
-    }
-  }
+        const sections = ['hero', 'about', 'services', 'admissions', 'testimonials', 'contact'];
+        const navList = document.getElementById('dynamicNav');
 
-  const revealElements = document.querySelectorAll('.reveal, .reveal-left, .reveal-right');
-  const observerOptions = { root: null, rootMargin: '0px', threshold: 0.1 };
-  const revealObserver = new IntersectionObserver((entries, observer) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('active');
-        observer.unobserve(entry.target);
-      }
-    });
-  }, observerOptions);
-  revealElements.forEach(el => revealObserver.observe(el));
-
-  const sections = document.querySelectorAll('section[id]');
-  const navLi = document.querySelectorAll('.navbar-nav .nav-item .nav-link');
-  window.addEventListener('scroll', () => {
-    let current = '';
-    const navbarHeight = getNavbarHeight() + 30; // Increased offset
-    sections.forEach(section => {
-      const sectionTop = section.offsetTop - navbarHeight;
-      if (pageYOffset >= sectionTop && pageYOffset < sectionTop + section.clientHeight) {
-        current = section.getAttribute('id');
-      }
-    });
-    if (window.innerHeight + window.pageYOffset >= document.body.offsetHeight - 5 && sections.length > 0) {
-        current = sections[sections.length -1].getAttribute('id');
-    }
-    navLi.forEach(link => {
-      link.classList.remove('active');
-      const href = link.getAttribute('href');
-      if (href && href.substring(1) === current) link.classList.add('active');
-    });
-    if (sections.length > 0 && pageYOffset < sections[0].offsetTop - navbarHeight) {
-        navLi.forEach(link => link.classList.remove('active'));
-        const homeLink = document.querySelector('.navbar-nav .nav-item .nav-link[href="#hero"]');
-        if (homeLink) homeLink.classList.add('active');
-    }
-  }, { passive: true }); // Added passive for performance
-
-  // --- Contact Form Submission Handler (Public Page) ---
-  const contactForm = document.getElementById('mainContactForm');
-  const contactFormStatusDiv = document.getElementById('contactFormStatus');
-  const contactSubmitButton = contactForm ? contactForm.querySelector('button[type="submit"]') : null;
-
-  if (contactForm && contactSubmitButton && contactFormStatusDiv) {
-    contactForm.addEventListener('submit', async function (event) {
-      event.preventDefault();
-      if (!contactForm.checkValidity()) {
-        event.stopPropagation();
-        contactForm.classList.add('was-validated');
-        contactFormStatusDiv.innerHTML = `<div class="alert alert-warning" role="alert">Please fill out all required fields.</div>`;
-        return;
-      }
-      contactForm.classList.add('was-validated');
-
-      const formData = new FormData(contactForm);
-      const data = {};
-      formData.forEach((value, key) => { data[key] = value; });
-
-      const originalButtonText = contactSubmitButton.innerHTML;
-      contactSubmitButton.disabled = true;
-      contactSubmitButton.innerHTML = 'Sending... <span class="spinner-border spinner-border-sm"></span>';
-      contactFormStatusDiv.innerHTML = '';
-
-      try {
-        const response = await fetch(`${API_BASE_URL_PUBLIC}/api/submit-contact`, { // Added /api prefix
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+        sections.forEach(secId => {
+            const el = document.getElementById(`${secId}-section`);
+            if (visibility[secId] === false) {
+                if(el) el.classList.add('d-none');
+            } else {
+                if(el) el.classList.remove('d-none');
+                if(navList) {
+                    const displayName = secId.charAt(0).toUpperCase() + secId.slice(1);
+                    navList.innerHTML += `<li class="nav-item"><a class="nav-link" href="#${secId}-section">${displayName}</a></li>`;
+                }
+            }
         });
-        const result = await response.json();
 
-        if (response.ok && result.success) {
-          if (result.action === 'whatsapp' && result.whatsappUrl) {
-            contactFormStatusDiv.innerHTML = `<div class="alert alert-info" role="alert">${result.message || 'Redirecting to WhatsApp...'}</div>`;
-            window.location.href = result.whatsappUrl;
-            // Button will remain disabled as page redirects
-          } else if (result.action === 'email') {
-            contactFormStatusDiv.innerHTML = `<div class="alert alert-success" role="alert">${result.message || 'Message sent successfully!'}</div>`;
-            contactForm.reset();
-            contactForm.classList.remove('was-validated');
-            contactSubmitButton.disabled = false;
-            contactSubmitButton.innerHTML = originalButtonText;
-          } else {
-            contactFormStatusDiv.innerHTML = `<div class="alert alert-warning" role="alert">${result.message || 'Request processed, action unclear.'}</div>`;
-            contactSubmitButton.disabled = false;
-            contactSubmitButton.innerHTML = originalButtonText;
-          }
-        } else {
-          contactFormStatusDiv.innerHTML = `<div class="alert alert-danger" role="alert">${result.message || 'An error occurred. Please try again.'}</div>`;
-          contactSubmitButton.disabled = false;
-          contactSubmitButton.innerHTML = originalButtonText;
+        // --- 3. Content ---
+        setText('navSchoolName', settings.schoolName);
+        setText('footerName', settings.schoolName);
+        setText('yearSpan', new Date().getFullYear());
+        
+        setText('topPhoneDisplay', settings.topHeaderPhone);
+        if(document.getElementById('topPhoneLink')) document.getElementById('topPhoneLink').href = `tel:${settings.topHeaderPhone}`;
+        
+        setText('topEmailDisplay', settings.topHeaderEmail);
+        if(document.getElementById('topEmailLink')) document.getElementById('topEmailLink').href = `mailto:${settings.topHeaderEmail}`;
+
+        setText('contactPhoneDisplay', settings.topHeaderPhone);
+        setText('contactEmailDisplay', settings.topHeaderEmail);
+
+        if (settings.logoURL) {
+            ['navLogo', 'footerLogo'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) { el.src = settings.logoURL; el.classList.remove('d-none'); }
+            });
+            const fav = document.getElementById('dynamicFavicon');
+            if(fav) fav.href = settings.logoURL;
         }
-      } catch (error) {
-        console.error('Error submitting contact form:', error);
-        contactFormStatusDiv.innerHTML = `<div class="alert alert-danger" role="alert">A network error occurred. Please try again.</div>`;
-        contactSubmitButton.disabled = false;
-        contactSubmitButton.innerHTML = originalButtonText;
-      }
-    });
-  }
+        
+        setHTML('aboutContent', settings.aboutUsText);
+        setHTML('admissionsContent', settings.admission);
+        if(document.getElementById('aboutImg')) document.getElementById('aboutImg').src = settings.aboutUsImageURL || 'https://via.placeholder.com/600';
 
-  // Bootstrap validation standard init (if not already done inline in HTML)
-  const formsNeedingValidation = document.querySelectorAll('.needs-validation');
-  Array.from(formsNeedingValidation).forEach(form => {
-    if (form.id !== 'mainContactForm') { // Avoid double-binding if mainContactForm already handled
-        form.addEventListener('submit', event => {
-          if (!form.checkValidity()) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          form.classList.add('was-validated');
-        }, false);
-    }
-  });
+        // --- 4. Render Lists ---
+        const sGrid = document.getElementById('servicesGrid');
+        if (safeServices.length > 0) {
+            sGrid.innerHTML = safeServices.map(s => `
+                <div class="col-md-6 col-lg-4">
+                    <div class="service-card text-center h-100">
+                        <div class="icon-box">
+                            ${s.image_url ? `<img src="${s.image_url}">` : `<i class="bi ${s.icon_class || 'bi-star'}"></i>`}
+                        </div>
+                        <h4>${s.title}</h4>
+                        <p class="text-muted small mt-3">${s.description}</p>
+                    </div>
+                </div>`).join('');
+        } else {
+            sGrid.innerHTML = '<div class="col-12 text-center text-muted">No services added.</div>';
+        }
 
-  // Dynamic year
-  const currentYearElements = document.querySelectorAll('[data-current-year]');
-  const nextYearElements = document.querySelectorAll('[data-next-year]');
-  const currentYear = new Date().getFullYear();
-  currentYearElements.forEach(el => el.textContent = currentYear);
-  nextYearElements.forEach(el => el.textContent = currentYear + 1);
+        const tGrid = document.getElementById('testimonialsGrid');
+        if (safeTestimonials.length > 0) {
+            tGrid.innerHTML = safeTestimonials.map(t => `
+                <div class="col-md-4">
+                    <div class="testimonial-card shadow-sm h-100 p-4 bg-white text-dark rounded-4">
+                        <div class="mb-3 text-warning"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i></div>
+                        <p class="fst-italic">"${t.message}"</p>
+                        <h6 class="mt-4 fw-bold text-primary mb-0">${t.name}</h6>
+                        <small class="text-muted">${t.role || 'Parent'}</small>
+                    </div>
+                </div>`).join('');
+        } else {
+            tGrid.innerHTML = '<div class="col-12 text-center text-white">No reviews yet.</div>';
+        }
 
+        const hInner = document.getElementById('heroInner');
+        const hInd = document.getElementById('heroIndicators');
+        if (visibility['hero'] !== false) {
+            if (safeSlides.length > 0) {
+                hInner.innerHTML = safeSlides.map((s, i) => `
+                    <div class="carousel-item ${i===0?'active':''}">
+                        <img src="${s.image_url}" class="d-block w-100" alt="Slide">
+                        <div class="carousel-caption d-none d-md-block">
+                            <h2 class="display-4 fw-bold">${settings.schoolName}</h2>
+                            <p class="lead fw-bold">${settings.schoolTagline || ''}</p>
+                        </div>
+                    </div>`).join('');
+                hInd.innerHTML = safeSlides.map((_, i) => `<button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="${i}" class="${i===0?'active':''}" aria-label="Slide ${i+1}"></button>`).join('');
+            } else {
+                hInner.innerHTML = `<div class="carousel-item active"><div class="d-block w-100 bg-secondary d-flex align-items-center justify-content-center text-white" style="height:600px;"><h3>${settings.schoolName}</h3></div></div>`;
+            }
+        }
+
+        // --- 5. WhatsApp Integration (Floating Button) ---
+        // Checks 'adminSchoolWhatsappNumber' first, falls back to 'socialWhatsapp'
+        const waNumber = settings.adminSchoolWhatsappNumber || settings.socialWhatsapp;
+        if (waNumber) {
+            const waBtn = document.getElementById('whatsappFab');
+            if (waBtn) {
+                waBtn.href = `https://wa.me/${waNumber}`;
+                waBtn.style.display = 'flex'; // Show the button
+            }
+        }
+
+        // --- 6. Contact Form Handling ---
+        const contactForm = document.getElementById('mainContactForm');
+        if (contactForm) {
+            contactForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                // Get form values
+                const name = this.querySelector('input[name="contactName"]').value;
+                const msg = this.querySelector('textarea[name="contactMessage"]').value;
+                const statusDiv = document.getElementById('contactStatus');
+                
+                // If we have a number, direct WhatsApp redirect is faster/reliable
+                if (waNumber) {
+                    statusDiv.innerHTML = '<span class="text-success">Redirecting to WhatsApp...</span>';
+                    const text = `Hello, my name is ${name}. ${msg}`;
+                    const url = `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`;
+                    
+                    setTimeout(() => {
+                        window.open(url, '_blank');
+                        this.reset();
+                        statusDiv.innerHTML = '';
+                    }, 1000);
+                } else {
+                    // Fallback: Just show a message if no number configured
+                    statusDiv.innerHTML = '<span class="text-info">Thank you! We will contact you soon.</span>';
+                }
+            });
+        }
+
+    } catch (e) { console.error("Script Error:", e); } 
+    finally { const loader = document.getElementById('page-loader'); if(loader) loader.style.display = 'none'; }
 });
+
+function setText(id, val) { const el = document.getElementById(id); if(el) el.innerText = val || ''; }
+function setHTML(id, val) { const el = document.getElementById(id); if(el) el.innerHTML = val || ''; }

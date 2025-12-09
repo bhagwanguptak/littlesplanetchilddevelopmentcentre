@@ -1,828 +1,392 @@
-const API_BASE_URL = '';
-const MAX_FACILITY_CARDS = 6;
-
-// Global CKEditor instances
-let aboutUsTextEditorInstance;
-let academicsEditorInstance;
-let admissionEditorInstance;
-let facilitiesTextEditorInstance;
-
-// --- UTILITY FUNCTIONS ---
-function getElement(id) { return document.getElementById(id); }
-function querySelector(selector) { return document.querySelector(selector); }
-function querySelectorAll(selector) { return document.querySelectorAll(selector); }
-function isAdminPage() { return window.location.pathname.includes('/admin.html'); }
-
-// --- CORE API FETCHER ---
-// Centralized function for making authenticated API calls.
-async function apiFetch(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-
-    const defaultHeaders = { 'Accept': 'application/json' };
-
-    if (token) {
-        defaultHeaders['Authorization'] = `Bearer ${token}`;
-    }
-
-    // FormData sets its own Content-Type with a boundary. Don't override it.
-    if (!(options.body instanceof FormData)) {
-        defaultHeaders['Content-Type'] = 'application/json';
-    }
-
-    const finalOptions = {
-        ...options,
-        headers: { ...defaultHeaders, ...options.headers },
-    };
-
-    try {
-        const response = await fetch(API_BASE_URL + endpoint, finalOptions);
-
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                console.error('Authentication error. Redirecting to login.');
-                localStorage.removeItem('token');
-                alert('Your session has expired or is invalid. Please log in again.');
-                window.location.href = '/login.html?sessionExpired=true';
-                throw new Error('Authentication Failed');
-            }
-            // For other errors, try to get a JSON message, otherwise fall back to text.
-            const errorBody = await response.json().catch(() => response.text());
-            const errorMessage = errorBody.message || errorBody.error || (typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody));
-            console.error(`API Error on ${endpoint}: ${response.status}`, errorBody);
-            throw new Error(`Server error: ${errorMessage}`);
-        }
-
-        // Handle successful responses with no content (e.g., DELETE)
-        if (response.status === 204) {
-            return null;
-        }
-
-        // Return the parsed JSON body for successful responses with content
-        return await response.json();
-
-    } catch (error) {
-        // Log and re-throw the error so the calling function's catch block can handle it.
-        // Avoid re-logging if it's our custom "Authentication Failed" error.
-        if (error.message !== 'Authentication Failed') {
-            console.error(`Network or processing error for ${endpoint}:`, error.message);
-        }
-        throw error;
-    }
-}
-
-
-// --- INITIALIZATION ---
-async function initAdminPage() {
-    console.log("Initializing admin page components...");
-    await initializeEditors();
-    setupImagePreviews();
-}
-
-async function initializeEditors() {
-  try {
-    const editorConfig = {
-        toolbar: [ 'heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList', 'removeFormat', '|', 'undo', 'redo' ],
-    };
-    if (getElement('aboutUsTextEditor')) aboutUsTextEditorInstance = await ClassicEditor.create(getElement('aboutUsTextEditor'), editorConfig);
-    if (getElement('academics-editor')) academicsEditorInstance = await ClassicEditor.create(getElement('academics-editor'), editorConfig);
-    if (getElement('admission-editor')) admissionEditorInstance = await ClassicEditor.create(getElement('admission-editor'), editorConfig);
-    if (getElement('facilitiesTextEditor')) facilitiesTextEditorInstance = await ClassicEditor.create(getElement('facilitiesTextEditor'), editorConfig);
-  } catch (error) {
-    console.error('Error initializing CKEditor:', error);
-  }
-}
-
-
-// --- DATA FETCHING ---
-async function fetchSettings() {
-  try {
-    // apiFetch returns the final settings object directly.
-    const serverSettings = await apiFetch(`/api/settings`);
-
-    const defaults = {
-      schoolName: '', defaultHeroTitle: 'Welcome to Our School',
-      schoolTagline: '', defaultHeroTagline: 'Nurturing Future Leaders',
-      schoolLocationFooter: '', defaultSchoolLocationFooter: 'No location available contact admin.',
-      logoURL: '', defaultLogoURL: '/uploads/logo-default.png',
-      aboutUsImageURL: '', defaultAboutImageURL: '/uploads/about-us-default.jpg',
-      academicsImageURL: '', defaultAcademicsImageURL: '/uploads/academics-default.jpg',
-      schoolFont: "'Poppins', sans-serif", schoolTheme: 'light',
-      aboutUsText: '<p>Default About Us. Configure in admin.</p>',
-      academics: '<p>Default Academics. Configure in admin.</p>',
-      admission: '<p>Default Admissions. Configure in admin.</p>',
-      facilitiesText: '<p>Default Facilities Overview. Configure in admin.</p>',
-      socialLinks: { facebook: '', twitter: '', instagram: '', linkedin: '', youtube: '' },
-      socialWhatsapp: '', contactMapEmbedURL: '',
-      facilityCards: Array(MAX_FACILITY_CARDS).fill({ iconClass: '', title: '', description: '' }),
-      aboutGradient: { color1: '#e0c3fc', color2: '#8ec5fc', color3: '#000000', color4: '#000000', direction: 'to right' },
-      admissionsGradient: { color1: '#007bff', color2: '#6f42c1', color3: '#000000', color4: '#000000', direction: '135deg' },
-      academicsGradient: { color1: '#f8f9fa', color2: '#e9ecef', color3: '#000000', color4: '#000000', direction: 'to bottom right' },
-      facilitiesGradient: { color1: '#f8f9fa', color2: '#ffffff', color3: '#000000', color4: '#000000', direction: 'to right' },
-      contactGradient: { color1: '#ffffff', color2: '#e9ecef', color3: '#000000', color4: '#000000', direction: 'to right' },
-      heroGradient: { color1: '#007bff', color2: '#6f42c1', color3: '#fd7e14', color4: '#00c6ff', direction: '45deg'},
-      defaultCarouselImageURL: '/uploads/placeholder-carousel.jpg ',
-      defaultCarouselAltText: 'Our Beautiful Campus', defaultCarouselLink: '#about',
-      contactFormAction: 'whatsapp', schoolContactEmail: '', adminSchoolWhatsappNumber: '',
-      topHeaderPhone: '',
-      topHeaderEmail: '',
-      topHeaderPhone: '',
-      topHeaderEmail: '',
-      topHeaderColor1: '#42a324',
-      topHeaderColor2: '#0a58ca',
-      topHeaderTextColor: '#ffffff',
-
-
-    };
-
-    const completeSettings = {
-        ...defaults,
-        ...(serverSettings || {}), // Use fallback in case server returns null
-        socialLinks: { ...defaults.socialLinks, ...(serverSettings?.socialLinks || {}) },
-        facilityCards: Array.isArray(serverSettings?.facilityCards) && serverSettings.facilityCards.length > 0
-            ? serverSettings.facilityCards.map(card => ({ ...{ iconClass: '', title: '', description: '' }, ...card })).slice(0, MAX_FACILITY_CARDS)
-            : defaults.facilityCards,
-        aboutGradient: { ...defaults.aboutGradient, ...(serverSettings?.aboutGradient || {}) },
-        admissionsGradient: { ...defaults.admissionsGradient, ...(serverSettings?.admissionsGradient || {}) },
-        academicsGradient: { ...defaults.academicsGradient, ...(serverSettings?.academicsGradient || {}) },
-        facilitiesGradient: { ...defaults.facilitiesGradient, ...(serverSettings?.facilitiesGradient || {}) },
-        contactGradient: { ...defaults.contactGradient, ...(serverSettings?.contactGradient || {}) },
-        heroGradient: { ...defaults.heroGradient, ...(serverSettings?.heroGradient || {}) }
-    };
-    
-    // Ensure the facility cards array is always the correct length for the admin UI
-    while (completeSettings.facilityCards.length < MAX_FACILITY_CARDS) {
-        completeSettings.facilityCards.push({ iconClass: '', title: '', description: '' });
-    }
-
-    return completeSettings;
-  } catch (error) {
-    console.error('Final catch in fetchSettings:', error.message);
-    if (!error.message.includes('Authentication Failed')) {
-        alert('Failed to load initial settings. Some defaults may be used. Check console.');
-    }
-    return null; // Return null so the calling function can handle failure
-  }
-}
-
-async function fetchCarouselImages() {
-  try {
-    const images = await apiFetch(`/api/carousel`);
-    return Array.isArray(images) ? images : [];
-  } catch (error) {
-    console.error('Final catch in fetchCarouselImages:', error.message);
-    return []; // Return empty array on failure
-  }
-}
-
-async function fetchUsers() {
-    try {
-        const users = await apiFetch('/api/users');
-        console.log("Fetched users:", users);
-        // Here you would typically populate a user list in the UI
-    } catch (error) {
-        console.error('Failed to fetch users:', error.message);
-        if (!error.message.includes('Authentication Failed')) {
-            alert(`Could not fetch users: ${error.message}`);
-        }
-    }
-}
-
-
-// --- DATA SAVING & UPLOADING ---
-async function saveSettingsToServer(settingsToSave) {
-    try {
-        const result = await apiFetch('/api/settings', {
-            method: 'POST',
-            body: JSON.stringify({ settings: settingsToSave }),
-        });
-        console.log('Settings saved successfully on server:', result);
-        return result;
-    } catch (error) {
-        console.error('Error saving settings to server:', error.message);
-        // Re-throw so the main save function knows about the failure
-        throw error;
-    }
-}
-
-async function handleImageUpload(inputId, previewId, currentUrlId, endpoint, formDataKey) {
-    const uploadInput = getElement(inputId);
-    let finalURL = getElement(currentUrlId).value;
-
-    if (uploadInput && uploadInput.files[0]) {
-        const formData = new FormData();
-        formData.append(formDataKey, uploadInput.files[0]);
-        try {
-            const result = await apiFetch(`/api/${endpoint}`, {
-                method: 'POST',
-                body: formData
-            });
-
-            if (result && result.url) {
-                finalURL = result.url;
-                getElement(currentUrlId).value = finalURL;
-                const preview = getElement(previewId);
-                if (preview) {
-                    preview.src = finalURL;
-                    preview.style.display = 'block';
-                }
-            } else {
-                throw new Error(`URL not found in ${formDataKey} upload response.`);
-            }
-        } catch (error) {
-            console.error(`Error during ${formDataKey} upload process:`, error);
-            // Re-throw so the main save function can abort
-            throw new Error(`Failed to upload ${formDataKey}: ${error.message}`);
-        }
-    }
-    return finalURL;
-}
-
-// --- MAIN ADMIN ACTIONS ---
-async function saveAdminSettings() {
-    if (!isAdminPage()) return;
-    const saveButton = querySelector('.container > button.btn-primary');
-    const originalButtonText = saveButton.innerHTML;
-    saveButton.disabled = true;
-    saveButton.innerHTML = 'Saving... <span class="spinner-border spinner-border-sm"></span>';
-
-    try {
-        // Handle image uploads first
-        const finalLogoURL = await handleImageUpload('logoUpload', 'logoPreviewAdmin', 'currentLogoURL', 'upload-logo', 'logo');
-        const finalAboutImageURL = await handleImageUpload('aboutImageUpload', 'aboutImagePreviewAdmin', 'currentAboutImageURL', 'upload-about-image', 'aboutImage');
-        const finalAcademicsImageURL = await handleImageUpload('academicsImageUpload', 'academicsImagePreviewAdmin', 'currentAcademicsImageURL', 'upload-academics-image', 'academicsImage');
-
-        // Collect all text and select data
-        const facilityCards = [];
-        for (let i = 0; i < MAX_FACILITY_CARDS; i++) {
-            const iconClass = getElement(`facilityIcon${i}`)?.value.trim() || '';
-            const title = getElement(`facilityTitle${i}`)?.value.trim() || '';
-            const description = getElement(`facilityDesc${i}`)?.value.trim() || '';
-            if (iconClass || title || description) {
-                facilityCards.push({ iconClass, title, description });
-            }
-        }
-
-        const settingsToSave = {
-            schoolName: getElement('schoolName')?.value || '',
-            defaultHeroTitle: getElement('defaultHeroTitle')?.value || '',
-            schoolTagline: getElement('school-tagline')?.value || '',
-            schoolLocationFooter: getElement('school-location-footer')?.value || '',
-            defaultHeroTagline: getElement('defaultHeroTagline')?.value || '',
-            logoURL: finalLogoURL, defaultLogoURL: getElement('defaultLogoURL')?.value || '',
-            aboutUsImageURL: finalAboutImageURL, defaultAboutImageURL: getElement('defaultAboutImageURL')?.value || '',
-            academicsImageURL: finalAcademicsImageURL, defaultAcademicsImageURL: getElement('defaultAcademicsImageURL')?.value || '',
-            schoolFont: getElement('fontSelect')?.value || "'Poppins', sans-serif",
-            schoolTheme: getElement('themeSelect')?.value || "light",
-            aboutUsText: aboutUsTextEditorInstance ? aboutUsTextEditorInstance.getData() : '',
-            academics: academicsEditorInstance ? academicsEditorInstance.getData() : '',
-            admission: admissionEditorInstance ? admissionEditorInstance.getData() : '',
-            facilitiesText: facilitiesTextEditorInstance ? facilitiesTextEditorInstance.getData() : '',
-            socialLinks: {
-                facebook: getElement('socialFacebook')?.value.trim() || '', twitter: getElement('socialTwitter')?.value.trim() || '',
-                instagram: getElement('socialInstagram')?.value.trim() || '', linkedin: getElement('socialLinkedIn')?.value.trim() || '',
-                youtube: getElement('socialYouTube')?.value.trim() || '',
-            },
-            socialWhatsapp: getElement('socialWhatsapp')?.value.trim() || '',
-            contactMapEmbedURL: extractSrcFromIframe(getElement('contactMapEmbedURL')?.value.trim() || ''),
-            facilityCards: facilityCards,
-            defaultCarouselImageURL: getElement('defaultCarouselImageURL')?.value.trim() || '',
-            defaultCarouselAltText: getElement('defaultCarouselAltText')?.value.trim() || '',
-            defaultCarouselLink: getElement('defaultCarouselLink')?.value.trim() || '',
-            contactFormAction: querySelector('input[name="contactFormAction"]:checked')?.value || 'whatsapp',
-            schoolContactEmail: getElement('schoolContactEmail')?.value.trim() || '',
-            adminSchoolWhatsappNumber: getElement('adminSchoolWhatsappNumber')?.value.trim() || '',
-            topHeaderPhone: getElement('topHeaderPhone')?.value.trim() || '',
-            topHeaderEmail: getElement('topHeaderEmail')?.value.trim() || '',
-            topHeaderPhone: getElement('topHeaderPhone')?.value.trim() || '',
-            topHeaderEmail: getElement('topHeaderEmail')?.value.trim() || '',
-            topHeaderColor1: getElement('topHeaderColor1')?.value || '#42a324',
-            topHeaderColor2: getElement('topHeaderColor2')?.value || '#0a58ca',
-            topHeaderTextColor: getElement('topHeaderTextColor')?.value || '#ffffff',
-
-
-        };
-
-        const gradientSections = ['hero', 'about', 'admissions', 'academics', 'facilities', 'contact'];
-        gradientSections.forEach(section => {
-            if (getElement(`${section}GradientColor1`)) {
-                settingsToSave[`${section}Gradient`] = {
-                    color1: getElement(`${section}GradientColor1`).value, color2: getElement(`${section}GradientColor2`).value,
-                    color3: getElement(`${section}GradientColor3`).value, color4: getElement(`${section}GradientColor4`).value,
-                    direction: getElement(`${section}GradientDirection`).value || 'to right',
-                };
-            }
-        });
-
-        // Save everything to the server
-        await saveSettingsToServer(settingsToSave);
-        alert('Settings saved successfully!');
-        await loadAdminData();
-
-    } catch (error) {
-        console.error('Error during saveAdminSettings:', error.message);
-        if (!error.message.includes('Authentication Failed')) {
-            alert(`Could not save settings: ${error.message}`);
-        }
-    } finally {
-        saveButton.disabled = false;
-        saveButton.innerHTML = originalButtonText;
-    }
-}
-
-async function uploadCarouselImage() {
-    const fileInput = getElement('carousel-image-upload');
-    const altInput = getElement('carousel-image-alt');
-    const linkInput = getElement('carousel-image-link');
-
-    if (!fileInput.files[0]) { alert('Please select an image file.'); return; }
-    if (!altInput.value.trim()) { alert('Please provide Alt Text / Caption.'); return; }
-
-    const formData = new FormData();
-    formData.append('carouselImage', fileInput.files[0]);
-    formData.append('altText', altInput.value.trim());
-    formData.append('linkURL', linkInput.value.trim());
-
-    try {
-        await apiFetch(`/api/carousel`, { method: 'POST', body: formData });
-        alert('Carousel image uploaded successfully!');
-        fileInput.value = ''; altInput.value = ''; linkInput.value = '';
-        await loadAdminData();
-    } catch (error) {
-        console.error('Error uploading carousel image:', error.message);
-        if (!error.message.includes('Authentication Failed')) {
-            alert(`Error uploading carousel image: ${error.message}`);
-        }
-    }
-}
-
-async function removeCarouselImageAdmin(id) {
-    if (!id) { alert('Error: Image ID is missing.'); return; }
-    if (!confirm('Are you sure you want to delete this carousel image?')) return;
-    try {
-        await apiFetch(`/api/carousel/${id}`, { method: 'DELETE' });
-        alert('Carousel image removed successfully.');
-        await loadAdminData();
-    } catch (error) {
-        console.error('Error removing carousel image:', error.message);
-        if (!error.message.includes('Authentication Failed')) {
-            alert(`Error removing image: ${error.message}`);
-        }
-    }
-}
-
-async function logoutAdmin() {
-    if (confirm('Are you sure you want to logout?')) {
-        try {
-            // Call the API to invalidate the session on the server side (if applicable)
-            await apiFetch(`/api/logout`, { method: 'POST' });
-            
-            // If the call succeeds, clear local data and redirect
-            localStorage.removeItem('token');
-            alert('Logout successful.');
-            window.location.href = '/login.html';
-        } catch (error) {
-            console.error('Error during logout process:', error.message);
-            // apiFetch already handles the auth error alert and redirect.
-            // This is a fallback for other issues. Still log the user out.
-            if (!error.message.includes('Authentication Failed')) {
-                alert('An unexpected error occurred during logout. Redirecting to login.');
-            }
-            localStorage.removeItem('token'); // Ensure token is cleared even on failure
-            window.location.href = '/login.html';
-        }
-    }
-}
-
-
-// --- DOM MANIPULATION & UI LOGIC (Admin and Public) ---
-
-// Load data into the main admin form or public-facing site
-async function loadAdminData() {
-  try {
-    if (isAdminPage()) {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.log('No token found. Redirecting to login.');
-        window.location.href = '/login.html?unauthorized=true';
-        return; // Stop execution
-      }
-    }
-
-    const [settings, carouselImages] = await Promise.all([
-        fetchSettings(),
-        fetchCarouselImages()
-    ]);
-
-    if (!settings) {
-        console.error("Failed to load settings, aborting page render.");
-        if (isAdminPage()) alert("Could not load core site settings. Page may not function correctly.");
-        return;
-    }
-
-    applyBaseSettings(settings);
-
-    if (isAdminPage()) {
-      populateAdminForm(settings, carouselImages);
-    } else {
-      populatePublicPage(settings, carouselImages);
-    }
-
-    // Set dynamic year in footer, etc.
-    const currentYear = new Date().getFullYear();
-    querySelectorAll('[data-current-year]').forEach(el => el.textContent = currentYear);
-    querySelectorAll('[data-next-year]').forEach(el => el.textContent = currentYear + 1);
-
-  } catch (error) {
-    console.error('Critical error during loadAdminData:', error.message);
-  }
-}
-
-function populateAdminForm(settings, carouselImages) {
-    getElement('schoolName').value = settings.schoolName || '';
-    getElement('defaultHeroTitle').value = settings.defaultHeroTitle || '';
-    getElement('school-tagline').value = settings.schoolTagline || '';
-    getElement('school-location-footer').value = settings.schoolLocationFooter || '';
-    getElement('defaultHeroTagline').value = settings.defaultHeroTagline || '';
-
-    getElement('currentLogoURL').value = settings.logoURL || '';
-    getElement('logoPreviewAdmin').src = settings.logoURL || '#';
-    getElement('logoPreviewAdmin').style.display = settings.logoURL ? 'block' : 'none';
-    getElement('defaultLogoURL').value = settings.defaultLogoURL || '';
-
-    getElement('currentAboutImageURL').value = settings.aboutUsImageURL || '';
-    getElement('aboutImagePreviewAdmin').src = settings.aboutUsImageURL || '#';
-    getElement('aboutImagePreviewAdmin').style.display = settings.aboutUsImageURL ? 'block' : 'none';
-    getElement('defaultAboutImageURL').value = settings.defaultAboutImageURL || '';
-
-    getElement('currentAcademicsImageURL').value = settings.academicsImageURL || '';
-    getElement('academicsImagePreviewAdmin').src = settings.academicsImageURL || '#';
-    getElement('academicsImagePreviewAdmin').style.display = settings.academicsImageURL ? 'block' : 'none';
-    getElement('defaultAcademicsImageURL').value = settings.defaultAcademicsImageURL || '';
-
-    if (aboutUsTextEditorInstance) aboutUsTextEditorInstance.setData(settings.aboutUsText || '');
-    if (academicsEditorInstance) academicsEditorInstance.setData(settings.academics || '');
-    if (admissionEditorInstance) admissionEditorInstance.setData(settings.admission || '');
-    if (facilitiesTextEditorInstance) facilitiesTextEditorInstance.setData(settings.facilitiesText || '');
-
-    getElement('fontSelect').value = settings.schoolFont || "'Poppins', sans-serif";
-    getElement('themeSelect').value = settings.schoolTheme || "light";
-
-    getElement('socialWhatsapp').value = settings.socialWhatsapp || '';
-    getElement('contactMapEmbedURL').value = settings.contactMapEmbedURL || '';
-    const socialLinks = settings.socialLinks || {};
-    getElement('socialFacebook').value = socialLinks.facebook || '';
-    getElement('socialTwitter').value = socialLinks.twitter || '';
-    getElement('socialInstagram').value = socialLinks.instagram || '';
-    getElement('socialLinkedIn').value = socialLinks.linkedin || '';
-    getElement('socialYouTube').value = socialLinks.youtube || '';
-
-    generateFacilityCardInputsAdmin(settings.facilityCards || []);
-
-    getElement('defaultCarouselImageURL').value = settings.defaultCarouselImageURL || '';
-    getElement('defaultCarouselAltText').value = settings.defaultCarouselAltText || '';
-    getElement('defaultCarouselLink').value = settings.defaultCarouselLink || '';
-
-    const contactAction = settings.contactFormAction || 'whatsapp';
-    getElement('contactActionEmail').checked = contactAction === 'email';
-    getElement('contactActionWhatsapp').checked = contactAction !== 'email';
-    getElement('schoolContactEmail').value = settings.schoolContactEmail || '';
-    getElement('adminSchoolWhatsappNumber').value = settings.adminSchoolWhatsappNumber || '';
-    getElement('topHeaderPhone').value = settings.topHeaderPhone || '';
-    getElement('topHeaderEmail').value = settings.topHeaderEmail || '';
-    getElement('topHeaderPhone').value = settings.topHeaderPhone || '';
-    getElement('topHeaderEmail').value = settings.topHeaderEmail || '';
-    getElement('topHeaderColor1').value = settings.topHeaderColor1 || '#42a324';
-    getElement('topHeaderColor2').value = settings.topHeaderColor2 || '#0a58ca';
-    getElement('topHeaderTextColor').value = settings.topHeaderTextColor || '#ffffff';
-
-
-
-    loadGradientSettings(settings);
-    displayCarouselImagesAdmin(carouselImages);
-}
-
-function populatePublicPage(settings, carouselImages) {
-    applyPublicSchoolDisplaySettings(settings);
-    populateCarouselPublic(carouselImages, settings);
-    populateFacilityCardsPublic(settings.facilityCards || [], settings.facilitiesText);
-    populateSocialLinksPublic(settings.socialLinks || {}, settings.socialWhatsapp);
-    applyMapPublic(settings.contactMapEmbedURL);
-    applyTopHeader(settings);
-
-}
-function applyTopHeader(settings) {
-   const header = document.querySelector('.top-header');
-  const phoneEl = document.getElementById('topPhone');
-  const emailEl = document.getElementById('topEmail');
-
-  // ✅ Phone
-  if (phoneEl && settings.topHeaderPhone) {
-    phoneEl.textContent = settings.topHeaderPhone;
-    phoneEl.href = `tel:${settings.topHeaderPhone.replace(/\s+/g, '')}`;
-    phoneEl.style.display = 'inline';
-  }
-
-  // ✅ Email
-  if (emailEl && settings.topHeaderEmail) {
-    emailEl.textContent = settings.topHeaderEmail;
-    emailEl.href = `mailto:${settings.topHeaderEmail}`;
-    emailEl.style.display = 'inline';
-  }
-
-  // ✅ Background Gradient
-  if (header) {
-    const c1 = settings.topHeaderColor1 || '#42a324';
-    const c2 = settings.topHeaderColor2 || '#0a58ca';
-    const text = settings.topHeaderTextColor || '#ffffff';
-
-    header.style.background = `linear-gradient(90deg, ${c1}, ${c2})`;
-    header.style.color = text;
-
-    header.querySelectorAll('a, i').forEach(el => {
-      el.style.color = text;
-    });
-  }
-}
-
-
-function generateFacilityCardInputsAdmin(facilityCardsData = []) {
-    const container = getElement('facilityCardsAdminContainer');
-    if (!container) return;
-    container.innerHTML = '<p class="text-muted">Fill in the details for each facility card you want to display on the public page.</p>';
-    for (let i = 0; i < MAX_FACILITY_CARDS; i++) {
-        const cardData = facilityCardsData[i] || { iconClass: '', title: '', description: '' };
-        const cardDiv = document.createElement('div');
-        cardDiv.className = 'facility-card-admin mb-3 p-3 border rounded';
-        cardDiv.innerHTML = `
-            <h5>Facility Card ${i + 1}</h5>
-            <div class="mb-2">
-                <label for="facilityIcon${i}" class="form-label small">Icon Class (e.g., bi-building-gear)</label>
-                <input type="text" id="facilityIcon${i}" class="form-control form-control-sm" value="${cardData.iconClass || ''}" placeholder="bi-building-gear">
-            </div>
-            <div class="mb-2">
-                <label for="facilityTitle${i}" class="form-label small">Title</label>
-                <input type="text" id="facilityTitle${i}" class="form-control form-control-sm" value="${cardData.title || ''}" placeholder="Card Title">
-            </div>
-            <div>
-                <label for="facilityDesc${i}" class="form-label small">Description</label>
-                <textarea id="facilityDesc${i}" class="form-control form-control-sm" rows="2" placeholder="Short description">${cardData.description || ''}</textarea>
-            </div>
-        `;
-        container.appendChild(cardDiv);
-    }
-}
-
-function loadGradientSettings(settings) {
-    const sections = ['hero', 'about', 'admissions', 'academics', 'facilities', 'contact'];
-    sections.forEach(section => {
-        const gradientData = settings[`${section}Gradient`] || {};
-        const getVal = (id) => getElement(`${section}Gradient${id}`);
-        if (getVal('Color1')) {
-            getVal('Color1').value = gradientData.color1 || '#000000';
-            getVal('Color2').value = gradientData.color2 || '#000000';
-            getVal('Color3').value = gradientData.color3 || '#000000';
-            getVal('Color4').value = gradientData.color4 || '#000000';
-            getVal('Direction').value = gradientData.direction || 'to right';
-        }
-    });
-}
-
-function displayCarouselImagesAdmin(images) {
-    const container = getElement('carousel-images-container');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!images || images.length === 0) {
-        container.innerHTML = '<p class="text-muted">No carousel images uploaded. Add one below.</p>';
-        return;
-    }
-    images.forEach(image => {
-        const div = document.createElement('div');
-        div.className = 'carousel-image-entry';
-        const fileName = image.file_name || 'N/A';
-        div.innerHTML = `
-            <div class="carousel-image-info">
-                <img src="${image.image_url}" alt="${image.alt_text || 'Carousel'}" class="carousel-image-preview">
-                <span>${image.alt_text || 'Unnamed'} (${fileName})</span>
-                ${image.link_url ? `<span><br><small>Links to: ${image.link_url}</small></span>` : ''}
-            </div>
-            <button class="btn btn-sm btn-danger" onclick="removeCarouselImageAdmin('${image.id}')" title="Delete Image"><i class="bi bi-trash"></i></button>
-        `;
-        container.appendChild(div);
-    });
-}
-
-function applyBaseSettings(settings) {
-    document.documentElement.setAttribute('data-theme', settings.schoolTheme || 'light');
-    document.documentElement.style.setProperty('--dynamic-body-font', settings.schoolFont || "'Poppins', sans-serif");
-}
-
-function applyPublicSchoolDisplaySettings(settings) {
-    const finalSchoolName = settings.schoolName || settings.defaultHeroTitle || 'Our School';
-    const finalTagline = settings.schoolTagline || settings.defaultHeroTagline || 'Nurturing Young Minds';
-    const finalSchoolLocationFooter = settings.schoolLocationFooter || settings.defaultSchoolLocationFooter;
-
-    getElement('pageTitle').textContent = `${finalSchoolName} | ${finalTagline.substring(0, 50)}`;
-    getElement('metaDescription').content = `Welcome to ${finalSchoolName}. ${finalTagline}.`;
-
-    querySelectorAll('.school-name').forEach(el => el.textContent = finalSchoolName);
-    ['heroSchoolName', 'navSchoolNameDisplay', 'aboutSchoolName', 'footerSchoolNameDisplay', 'footerCopyrightSchoolName'].forEach(id => {
-        const el = getElement(id);
-        if (el) el.textContent = finalSchoolName;
-    });
-
-    const logoUrlToUse = settings.logoURL || settings.defaultLogoURL;
-    ['logoURL', 'footerLogoURL'].forEach(id => {
-        const el = getElement(id);
-        if (el) { el.src = logoUrlToUse; el.alt = `${finalSchoolName} Logo`; }
-    });
-    setDynamicFavicon(logoUrlToUse);
-
-    getElement('aboutUsImage').src = settings.aboutUsImageURL || settings.defaultAboutImageURL;
-    getElement('aboutUsImage').alt = `About ${finalSchoolName}`;
-    getElement('school-location-footer').textContent = finalSchoolLocationFooter;
-    
-    const academicsImageEl = getElement('academicsImage'); 
-    if(academicsImageEl) {
-      academicsImageEl.src = settings.academicsImageURL || settings.defaultAcademicsImageURL;
-      academicsImageEl.alt = `Academics at ${finalSchoolName}`;
-    }
-
-    querySelector('.about-us-info').innerHTML = settings.aboutUsText || '<p>Info coming soon.</p>';
-    querySelector('.admission-info').innerHTML = settings.admission || '<p>Details coming soon.</p>';
-    querySelector('.academics-info-container .academics-dynamic-content').innerHTML = settings.academics || '<p>Curriculum details soon.</p>';
-    getElement('heroSchoolTagline').textContent = finalTagline;
-
-    applySectionGradient('hero', settings.heroGradient);
-    applySectionGradient('about', settings.aboutGradient);
-    applySectionGradient('admissions', settings.admissionsGradient);
-    applySectionGradient('academics', settings.academicsGradient);
-    applySectionGradient('facilities', settings.facilitiesGradient);
-    applySectionGradient('contact', settings.contactGradient);
-}
-
-function populateCarouselPublic(images, settings) {
-    const carouselInner = getElement('carousel-inner');
-    const carouselIndicators = getElement('carousel-indicators');
-    if (!carouselInner || !carouselIndicators) return;
-    carouselInner.innerHTML = ''; carouselIndicators.innerHTML = '';
-
-    const effectiveImages = (images && images.length > 0) ? images : [{
-        image_url: settings.defaultCarouselImageURL,
-        alt_text: settings.defaultCarouselAltText,
-        link_url: settings.defaultCarouselLink,
-    }];
-
-    if (!effectiveImages[0]?.image_url) { // No images and no default
-        carouselInner.innerHTML = '<div class="carousel-item active"><div class="d-block w-100 bg-secondary" style="height: 400px;"></div></div>';
-        return;
-    }
-
-    effectiveImages.forEach((image, index) => {
-        const itemDiv = document.createElement('div');
-        itemDiv.className = `carousel-item${index === 0 ? ' active' : ''}`;
-        let imgHtml = `<img src="${image.image_url}" class="d-block w-100" alt="${image.alt_text || 'School image'}">`;
-        
-        if (image.link_url && image.link_url.trim() !== '' && image.link_url.trim() !== '#') {
-            const isExternal = image.link_url.startsWith('http');
-            const targetLink = isExternal ? image.link_url : (image.link_url.startsWith('#') ? image.link_url : '#' + image.link_url);
-            imgHtml = `<a href="${targetLink}" ${isExternal ? 'target="_blank" rel="noopener noreferrer"' : ''}>${imgHtml}</a>`;
-        }
-        itemDiv.innerHTML = imgHtml;
-        carouselInner.appendChild(itemDiv);
-
-        const indicatorButton = document.createElement('button');
-        indicatorButton.type = 'button';
-        indicatorButton.dataset.bsTarget = '#schoolCarousel';
-        indicatorButton.dataset.bsSlideTo = index.toString();
-        if (index === 0) {
-            indicatorButton.className = 'active';
-            indicatorButton.setAttribute('aria-current', 'true');
-        }
-        indicatorButton.setAttribute('aria-label', `Slide ${index + 1}`);
-        carouselIndicators.appendChild(indicatorButton);
-    });
-}
-
-function populateFacilityCardsPublic(facilityCardsData = [], facilitiesOverviewText) {
-    const container = getElement('facilityCardsPublicContainer');
-    if (!container) return;
-    const activeCards = facilityCardsData.filter(card => card.title);
-    if (activeCards.length === 0) {
-        container.innerHTML = `<div class="col-12"><p class="text-center text-muted">${facilitiesOverviewText || 'Facilities details coming soon.'}</p></div>`;
-        return;
-    }
-    container.innerHTML = activeCards.slice(0, MAX_FACILITY_CARDS).map(card => `
-        <div class="col-md-6 col-lg-4 reveal">
-          <div class="card facility-card h-100">
-            <div class="card-body text-center">
-              <i class="bi ${card.iconClass || 'bi-check-circle-fill'} display-4 text-primary mb-3"></i>
-              <h5 class="card-title">${card.title}</h5>
-              <p class="card-text">${card.description}</p>
-            </div>
-          </div>
-        </div>`).join('');
-}
-
-function populateSocialLinksPublic(socialLinks = {}, whatsappNumber) {
-    const linkMapping = {
-        'socialFacebookLink': socialLinks.facebook, 'socialTwitterLink': socialLinks.twitter,
-        'socialInstagramLink': socialLinks.instagram, 'socialLinkedInLink': socialLinks.linkedin,
-        'socialYouTubeLink': socialLinks.youtube,
-    };
-    for (const [elementId, url] of Object.entries(linkMapping)) {
-        const linkElement = getElement(elementId);
-        if (linkElement) {
-            const parent = linkElement.parentElement; // The <li>
-            if (url) { parent.style.display = 'inline-block'; linkElement.href = url; } 
-            else { parent.style.display = 'none'; }
-        }
-    }
-    const whatsappLinkEl = getElement('whatsappLink');
-    if (whatsappLinkEl) {
-        if (whatsappNumber) {
-            whatsappLinkEl.style.display = 'flex';
-            whatsappLinkEl.href = `https://wa.me/${whatsappNumber.replace(/\D/g, '')}`;
-        } else { whatsappLinkEl.style.display = 'none'; }
-    }
-}
-
-function applyMapPublic(mapEmbedURL) {
-    const mapContainer = getElement('mapContainer');
-    const schoolMapIframe = getElement('schoolMap');
-    const mapPlaceholder = getElement('mapPlaceholder');
-    if (schoolMapIframe && mapContainer && mapPlaceholder) {
-        if (mapEmbedURL) {
-            schoolMapIframe.src = mapEmbedURL;
-            mapContainer.style.display = 'flex';
-            mapPlaceholder.style.display = 'none';
-        } else {
-            mapContainer.style.display = 'none';
-            mapPlaceholder.style.display = 'block';
-        }
-    }
-}
-
-function applySectionGradient(sectionId, gradientSettings) {
-    const sectionElement = document.getElementById(sectionId);
-    if (!sectionElement || !gradientSettings) { return; }
-    const colors = [gradientSettings.color1, gradientSettings.color2, gradientSettings.color3, gradientSettings.color4]
-        .filter(c => c && c.trim() && c.toLowerCase() !== '#000000' && c.toLowerCase() !== '#000');
-    
-    if (colors.length === 0) {
-        sectionElement.style.backgroundImage = '';
-        sectionElement.style.backgroundColor = '';
-    } else if (colors.length === 1) {
-        sectionElement.style.backgroundImage = '';
-        sectionElement.style.backgroundColor = colors[0];
-    } else {
-        const direction = gradientSettings.direction || 'to right';
-        sectionElement.style.backgroundColor = '';
-        sectionElement.style.backgroundImage = `linear-gradient(${direction}, ${colors.join(', ')})`;
-    }
-}
-
-function setDynamicFavicon(pngUrl) {
-    if (!pngUrl) return;
-    const favicon = getElement('favicon');
-    const appleTouchIcon = getElement('apple-touch-favicon');
-    if (favicon) favicon.href = pngUrl;
-    if (appleTouchIcon) appleTouchIcon.href = pngUrl;
-}
-
-function extractSrcFromIframe(inputString) {
-    if (inputString.includes('<iframe')) {
-        const match = inputString.match(/src="([^"]+)"/);
-        return match ? match[1] : inputString;
-    }
-    return inputString;
-}
-
-function setupImagePreviews() {
-    ['logoUpload', 'aboutImageUpload', 'academicsImageUpload'].forEach(inputId => {
-        const inputElement = getElement(inputId);
-        if (inputElement) {
-            inputElement.addEventListener('change', function() {
-                const previewId = inputId.replace('Upload', 'PreviewAdmin');
-                const previewElement = getElement(previewId);
-                if (this.files && this.files[0]) {
-                    previewElement.src = URL.createObjectURL(this.files[0]);
-                    previewElement.style.display = 'block';
-                }
-            });
-        }
-    });
-}
-
-// --- GLOBAL ASSIGNMENTS & DOM READY ---
-window.saveAdminSettings = saveAdminSettings;
-window.uploadCarouselImage = uploadCarouselImage;
-window.removeCarouselImageAdmin = removeCarouselImageAdmin;
-window.logoutAdmin = logoutAdmin;
-window.fetchUsers = fetchUsers;
+const API_BASE = '';
+let aboutEditor, admissionEditor;
 
 document.addEventListener('DOMContentLoaded', async () => {
-    if (isAdminPage()) {
-        await initAdminPage();
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/login.html'; return; }
+
+    // --- CKEDITOR CONFIGURATION (Super Build) ---
+    const editorConfig = {
+        toolbar: {
+            items: [
+                'heading', '|',
+                'bold', 'italic', 'underline', 'strikethrough', '|',
+                'fontColor', 'fontBackgroundColor', '|', 
+                'bulletedList', 'numberedList', '|',
+                'outdent', 'indent', '|',
+                'undo', 'redo', '|',
+                'link', 'blockQuote', 'insertTable'
+            ],
+            shouldNotGroupWhenFull: true
+        },
+        // ★ IMPORTANT: Disable all Premium/Pro features to stop License Errors ★
+        removePlugins: [
+            // Premium Features (Require License) - CAUSING YOUR ERRORS
+            'AIAssistant',
+            'CKBox',
+            'CKFinder',
+            'EasyImage',
+            'RealTimeCollaborativeComments',
+            'RealTimeCollaborativeTrackChanges',
+            'RealTimeCollaborativeRevisionHistory',
+            'PresenceList',
+            'Comments',
+            'TrackChanges',
+            'TrackChangesData',
+            'RevisionHistory',
+            'Pagination',
+            'WProofreader',
+            'MathType',
+            'SlashCommand',
+            'Template',
+            'FormatPainter',
+            'PasteFromOfficeEnhanced',
+            'CaseChange',
+            'DocumentOutline',
+            'TableOfContents',
+            'ExportPdf',
+            'ExportWord',
+            'ImportWord',
+            'MultiLevelList',
+            'TextPartLanguage'
+        ]
+    };
+
+    // Initialize Editors
+    if (document.querySelector('#aboutUsTextEditor')) {
+        try {
+            aboutEditor = await CKEDITOR.ClassicEditor.create(document.querySelector('#aboutUsTextEditor'), editorConfig);
+        } catch (e) { console.error("About Editor init failed", e); }
     }
+    if (document.querySelector('#admission-editor')) {
+        try {
+            admissionEditor = await CKEDITOR.ClassicEditor.create(document.querySelector('#admission-editor'), editorConfig);
+        } catch (e) { console.error("Admission Editor init failed", e); }
+    }
+
     await loadAdminData();
 });
+
+// --- API Helper ---
+async function apiFetch(url, options = {}) {
+    const token = localStorage.getItem('token');
+    options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+    if (!(options.body instanceof FormData)) options.headers['Content-Type'] = 'application/json';
+    
+    const res = await fetch(url, options);
+    if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('token');
+        window.location.href = '/login.html';
+        throw new Error('Unauthorized');
+    }
+    return res.json();
+}
+
+// --- Load Data ---
+async function loadAdminData() {
+    try {
+        const settings = await apiFetch('/api/settings');
+        
+        // Load others safely
+        let services = [], testimonials = [], carousel = [];
+        try { services = await apiFetch('/api/services'); } catch(e){ console.error('Services load error', e); }
+        try { testimonials = await apiFetch('/api/testimonials'); } catch(e){ console.error('Testimonials load error', e); }
+        try { carousel = await apiFetch('/api/carousel'); } catch(e){ console.error('Carousel load error', e); }
+
+        // 1. General Settings
+        if(settings) {
+            document.getElementById('schoolName').value = settings.schoolName || '';
+            document.getElementById('school-tagline').value = settings.schoolTagline || '';
+            document.getElementById('topHeaderPhone').value = settings.topHeaderPhone || '';
+            document.getElementById('topHeaderEmail').value = settings.topHeaderEmail || '';
+            document.getElementById('currentLogoURL').value = settings.logoURL || '';
+            
+            if(settings.logoURL) {
+                document.getElementById('logoPreviewAdmin').src = settings.logoURL;
+                document.getElementById('logoPreviewAdmin').style.display = 'block';
+            }
+            if(aboutEditor) aboutEditor.setData(settings.aboutUsText || '');
+            if(admissionEditor) admissionEditor.setData(settings.admission || '');
+
+       
+            if(settings.themePrimary) {
+                document.getElementById('themePrimary').value = settings.themePrimary;
+                document.getElementById('themePrimaryText').value = settings.themePrimary;
+            }
+            if(settings.themeSecondary) {
+                document.getElementById('themeSecondary').value = settings.themeSecondary;
+                document.getElementById('themeSecondaryText').value = settings.themeSecondary;
+            }
+        
+            
+            // ★★★ FIX: Handle Object vs String correctly here ★★★
+            renderVisibilityToggles(settings.sectionVisibility);
+        }
+
+        renderServicesList(services);
+        renderTestimonialsList(testimonials);
+        renderCarouselList(carousel);
+
+    } catch (e) { 
+        console.error("CRITICAL LOAD ERROR", e); 
+        alert("Error loading data. Check console.");
+    }
+}
+
+// --- Visibility Logic (FIXED) ---
+function renderVisibilityToggles(visData) {
+    // Default to true
+    let visibility = { hero: true, about: true, services: true, admissions: true, testimonials: true, contact: true }; 
+    
+    // ★ FIX: Check if it's a string before parsing
+    if (visData) {
+        if (typeof visData === 'string') {
+            try { visData = JSON.parse(visData); } catch(e) { console.warn("Vis parse error", e); }
+        }
+        // Merge saved data into defaults
+        visibility = { ...visibility, ...visData };
+    }
+    
+    const sections = ['hero', 'about', 'services', 'admissions', 'testimonials', 'contact'];
+    const container = document.getElementById('visibilityContainer');
+    
+    container.innerHTML = sections.map(sec => `
+        <div class="col-md-2 col-4 mb-3 text-center">
+            <div class="form-check form-switch d-flex flex-column align-items-center">
+                <input class="form-check-input" type="checkbox" id="toggle_${sec}" style="width: 3em; height: 1.5em;" ${visibility[sec] ? 'checked' : ''}>
+                <label class="form-check-label d-block small fw-bold text-uppercase mt-2" for="toggle_${sec}">${sec}</label>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getVisibilityState() {
+    const sections = ['hero', 'about', 'services', 'admissions', 'testimonials', 'contact'];
+    let state = {};
+    sections.forEach(sec => {
+        const el = document.getElementById(`toggle_${sec}`);
+        // If element exists, use checked state.
+        if (el) state[sec] = el.checked;
+    });
+    // We send an Object. The server handles stringifying if needed.
+    return state; 
+}
+
+// --- Services (Cards) ---
+async function addService() {
+    const title = document.getElementById('newServiceTitle').value;
+    const desc = document.getElementById('newServiceDesc').value;
+    const icon = document.getElementById('newServiceIcon').value;
+    const file = document.getElementById('newServiceImage').files[0];
+
+    if(!title) return alert('Title is required');
+
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', desc);
+    formData.append('icon_class', icon);
+    if (file) formData.append('image', file);
+
+    const btn = document.querySelector('button[onclick="addService()"]');
+    btn.disabled = true; btn.innerText = "Adding...";
+    try {
+        await apiFetch('/api/services', { method: 'POST', body: formData });
+        // Clear inputs
+        document.getElementById('newServiceTitle').value = '';
+        document.getElementById('newServiceDesc').value = '';
+        document.getElementById('newServiceImage').value = '';
+        document.getElementById('newServiceIcon').value = '';
+        const services = await apiFetch('/api/services');
+        renderServicesList(services);
+    } catch(e) { alert("Failed to add service"); }
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-plus-lg"></i> Add Service';
+}
+
+async function deleteService(id) {
+    if(confirm('Delete this service card?')) {
+        await apiFetch(`/api/services/${id}`, { method: 'DELETE' });
+        const services = await apiFetch('/api/services');
+        renderServicesList(services);
+    }
+}
+
+function renderServicesList(services) {
+    const list = document.getElementById('servicesList');
+    if(!services || services.length === 0) {
+        list.innerHTML = '<div class="col-12 text-center text-muted">No services added yet.</div>';
+        return;
+    }
+    list.innerHTML = services.map(s => `
+        <div class="col-md-4">
+            <div class="list-item-custom">
+                <button onclick="deleteService(${s.id})" class="btn-delete-item btn btn-sm btn-danger">&times;</button>
+                <div class="d-flex align-items-center mb-2">
+                    ${s.image_url 
+                        ? `<img src="${s.image_url}" style="width:40px;height:40px;border-radius:5px;object-fit:cover;margin-right:10px;">` 
+                        : `<i class="bi ${s.icon_class || 'bi-star'} fs-4 text-primary me-2"></i>`
+                    }
+                    <strong class="text-truncate">${s.title}</strong>
+                </div>
+                <small class="d-block text-muted" style="height:40px; overflow:hidden;">${s.description}</small>
+            </div>
+        </div>
+    `).join('');
+}
+
+// --- Testimonials ---
+async function addTestimonial() {
+    const name = document.getElementById('newTestimonialName').value;
+    const role = document.getElementById('newTestimonialRole').value;
+    const msg = document.getElementById('newTestimonialMsg').value;
+
+    if(!name || !msg) return alert('Name and Message required');
+    
+    try {
+        await apiFetch('/api/testimonials', {
+            method: 'POST',
+            body: JSON.stringify({ name, role, message: msg })
+        });
+        document.getElementById('newTestimonialName').value = '';
+        document.getElementById('newTestimonialRole').value = '';
+        document.getElementById('newTestimonialMsg').value = '';
+        const list = await apiFetch('/api/testimonials');
+        renderTestimonialsList(list);
+    } catch(e) { alert("Failed to add testimonial."); }
+}
+
+async function deleteTestimonial(id) {
+    if(confirm('Delete review?')) {
+        await apiFetch(`/api/testimonials/${id}`, { method: 'DELETE' });
+        const list = await apiFetch('/api/testimonials');
+        renderTestimonialsList(list);
+    }
+}
+
+function renderTestimonialsList(list) {
+    const container = document.getElementById('testimonialsList');
+    if(!list || list.length === 0) {
+         container.innerHTML = '<div class="col-12 text-center text-muted">No testimonials yet.</div>';
+         return;
+    }
+    container.innerHTML = list.map(t => `
+        <div class="col-md-4">
+            <div class="list-item-custom">
+                <button onclick="deleteTestimonial(${t.id})" class="btn-delete-item btn btn-sm btn-danger">&times;</button>
+                <strong>${t.name}</strong> <span class="small text-muted">(${t.role || 'Parent'})</span>
+                <p class="small mb-0 text-muted fst-italic">"${t.message.substring(0,50)}..."</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+// --- Carousel ---
+async function uploadCarouselImage() {
+    const file = document.getElementById('carousel-image-upload').files[0];
+    if(!file) return alert('Choose an image');
+
+    const btn = document.querySelector('button[onclick="uploadCarouselImage()"]');
+    btn.disabled = true; btn.innerText = "Uploading...";
+    
+    try {
+        const formData = new FormData();
+        formData.append('carouselImage', file);
+        await apiFetch('/api/carousel', { method: 'POST', body: formData });
+        document.getElementById('carousel-image-upload').value = '';
+        const carousel = await apiFetch('/api/carousel');
+        renderCarouselList(carousel);
+    } catch(e) { alert("Upload failed"); }
+    btn.disabled = false; btn.innerText = "Upload";
+}
+
+async function deleteCarouselImage(id) {
+    if(confirm('Delete slide?')) {
+        await apiFetch(`/api/carousel/${id}`, { method: 'DELETE' });
+        const carousel = await apiFetch('/api/carousel');
+        renderCarouselList(carousel);
+    }
+}
+
+function renderCarouselList(list) {
+    const container = document.getElementById('carousel-images-container');
+    if(!list || list.length === 0) {
+        container.innerHTML = '<div class="col-12 text-center text-muted">No slides.</div>';
+        return;
+    }
+    container.innerHTML = list.map(c => `
+        <div class="col-3 position-relative">
+            <img src="${c.image_url}" class="img-fluid rounded border" style="width:100%; height:80px; object-fit:cover;">
+            <button onclick="deleteCarouselImage(${c.id})" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1" style="padding:0px 6px;">&times;</button>
+        </div>
+    `).join('');
+}
+
+// --- Main Save ---
+async function saveAdminSettings() {
+    const btn = document.querySelector('button[onclick="saveAdminSettings()"]');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+    // Logo Upload logic
+    let logoURL = document.getElementById('currentLogoURL').value;
+    const logoFile = document.getElementById('logoUpload').files[0];
+    if (logoFile) {
+        try {
+            const fd = new FormData(); fd.append('logo', logoFile);
+            const res = await apiFetch('/api/upload-logo', { method: 'POST', body: fd });
+            logoURL = res.url;
+        } catch(e) { console.error("Logo upload failed", e); }
+    }
+
+    const settings = {
+        schoolName: document.getElementById('schoolName').value,
+        schoolTagline: document.getElementById('school-tagline').value,
+        topHeaderPhone: document.getElementById('topHeaderPhone').value,
+        topHeaderEmail: document.getElementById('topHeaderEmail').value,
+        logoURL: logoURL,
+        aboutUsText: aboutEditor ? aboutEditor.getData() : '',
+        admission: admissionEditor ? admissionEditor.getData() : '',
+        
+        sectionVisibility: getVisibilityState(), // Now returns an Object, safe for server
+       // ★ Add these two lines here to SAVE the colors ★
+        themePrimary: document.getElementById('themePrimary').value,
+        themeSecondary: document.getElementById('themeSecondary').value
+    };
+
+    try {
+        await apiFetch('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify({ settings })
+        });
+        alert('All settings saved successfully!');
+        // Reload to show saved state
+        await loadAdminData();
+    } catch(e) {
+        alert('Error saving settings.');
+    } finally {
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-save-fill me-2"></i>SAVE ALL CHANGES';
+    }
+}
+
+
+// --- Helper: Sync Color Pickers with Text Inputs ---
+document.addEventListener('DOMContentLoaded', () => {
+    ['themePrimary', 'themeSecondary'].forEach(id => {
+        const picker = document.getElementById(id);
+        const text = document.getElementById(id + 'Text');
+        
+        if(picker && text) {
+            // When color picker changes, update text box
+            picker.addEventListener('input', () => {
+                text.value = picker.value;
+            });
+            // When text box changes, update color picker
+            text.addEventListener('input', () => {
+                picker.value = text.value;
+            });
+        }
+    });
+});
+
+function logoutAdmin() {
+    localStorage.removeItem('token');
+    window.location.href = '/login.html';
+}
